@@ -43,10 +43,10 @@
   <div class="bar">
     <span class="pill">❤️ <span id="hp">100</span></span>
     <span class="pill">🔫 <span id="ammo">30</span>/30</span>
-    <span class="pill">🎯 <span id="left">8</span> guards left</span>
+    <span class="pill">🎯 <span id="left">29</span> guards left</span>
     <span class="pill">⏱ <span id="time">0:00</span></span>
   </div>
-  <div id="obj">Mission 1 — Trainyard. Eliminate the guards, then reach the green extraction zone.</div>
+  <div id="obj">Objective 1 — Reach the Small Garage. 29 guards on real patrol routes. No extraction point exists in the mission data.</div>
   <div id="cross"></div><div id="hit"></div><div id="dmg"></div>
   <div id="stick"><div id="knob"></div></div>
   <div class="btn" id="fire">FIRE</div>
@@ -57,16 +57,18 @@
 <div id="screen">
   <h1>PROJECT I.G.I.</h1>
   <h2>Mission 1 — Trainyard &nbsp;·&nbsp; Lightweight phone build</h2>
-  <p>Real IGI data: terrain heights, 393 decoded textures and 415 model groups
-     from Mission 1, plus 37 guard AI scripts. Three.js / WebGL2 only —
+  <p>Real IGI data: 169 decoded MEF models placed at the 475 real
+     objects.qvm positions, 29 guards on their real patrol routes, 393 real
+     textures, real terrain heights. Three.js / WebGL2 only —
      no .NET, no WebGPU, no big runtime download.</p>
   <p>Phone: left stick to move · drag right side to look · FIRE to shoot.
      Desktop: WASD + mouse, click to shoot, R reload.</p>
   <button id="play">▶ &nbsp;PLAY</button>
   <div id="load">Tap PLAY to load Trainyard…</div>
-  <p class="small">Lightweight build: ~1.5 MB initial (Three.js + level data). Level data
-     streams on demand. See README / REPORT for what is real IGI data and
-     what is approximated. Not affiliated with Innerloop / Eidos.</p>
+  <p class="small">Lightweight build: ~4.6 MB initial (Three.js + level data, incl.
+     2.2 MB of real model geometry). Level data streams on demand.
+     See README / REPORT for what is real IGI data and what is left out.
+     Not affiliated with Innerloop / Eidos.</p>
 </div>
 <script type="importmap">{"imports":{"three":"./three.module.min.js"}}</script>
 <script type="module" src="./game.js"></script>
