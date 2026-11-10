@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f0a">
+<title>IGI Phone — Mission 1: Trainyard (lightweight)</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#0b0f0a; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; color:#e8f0df; touch-action:none; }
+  #app { position:fixed; inset:0; }
+  canvas { display:block; }
+  #hud { position:fixed; inset:0; pointer-events:none; z-index:5; display:none; }
+  #hud.on { display:block; }
+  .bar { position:absolute; top:10px; left:10px; right:10px; display:flex; gap:8px; align-items:center; }
+  .pill { background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.18); border-radius:999px; padding:6px 12px; font-size:13px; font-weight:600; }
+  #obj { position:absolute; top:52px; left:10px; right:10px; font-size:12px; line-height:1.4; background:rgba(0,0,0,.45); border-radius:8px; padding:6px 10px; }
+  #cross { position:absolute; left:50%; top:50%; width:18px; height:18px; margin:-9px 0 0 -9px; }
+  #cross:before,#cross:after { content:""; position:absolute; background:#fff; opacity:.9; }
+  #cross:before { left:8px; top:0; width:2px; height:18px; }
+  #cross:after { top:8px; left:0; width:18px; height:2px; }
+  #hit { position:absolute; left:50%; top:50%; width:34px; height:34px; margin:-17px 0 0 -17px; border:2px solid #ffdf4d; border-radius:50%; opacity:0; }
+  #dmg { position:absolute; inset:0; background:radial-gradient(ellipse at center, transparent 55%, rgba(255,0,0,.55) 100%); opacity:0; }
+  #stick { position:absolute; left:18px; bottom:22px; width:120px; height:120px; border-radius:50%; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.25); pointer-events:auto; }
+  #knob { position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.35); }
+  .btn { position:absolute; border-radius:50%; background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.35); color:#fff; font-weight:700; pointer-events:auto; display:flex; align-items:center; justify-content:center; }
+  #fire { right:20px; bottom:30px; width:84px; height:84px; font-size:15px; background:rgba(200,40,30,.55); }
+  #reload { right:116px; bottom:44px; width:56px; height:56px; font-size:12px; }
+  #jump { right:30px; bottom:132px; width:56px; height:56px; font-size:12px; }
+  #screen { position:fixed; inset:0; z-index:10; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:24px; background:linear-gradient(180deg,#0d1a0b,#05070a); }
+  #screen h1 { font-size:26px; letter-spacing:2px; margin-bottom:6px; }
+  #screen h2 { font-size:14px; font-weight:400; opacity:.8; margin-bottom:14px; }
+  #screen p { font-size:13px; line-height:1.55; opacity:.85; max-width:520px; margin-bottom:10px; }
+  #screen .small { font-size:11px; opacity:.6; }
+  #play { pointer-events:auto; margin:14px 0 8px; padding:14px 34px; font-size:17px; font-weight:700; border:0; border-radius:999px; background:#5da83a; color:#fff; }
+  #load { font-size:13px; opacity:.8; min-height:18px; }
+  #toast { position:fixed; left:50%; bottom:170px; transform:translateX(-50%); z-index:6; background:rgba(0,0,0,.7); padding:8px 14px; border-radius:999px; font-size:13px; display:none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="hud">
+  <div class="bar">
+    <span class="pill">❤️ <span id="hp">100</span></span>
+    <span class="pill">🔫 <span id="ammo">30</span>/30</span>
+    <span class="pill">🎯 <span id="left">8</span> guards left</span>
+    <span class="pill">⏱ <span id="time">0:00</span></span>
+  </div>
+  <div id="obj">Mission 1 — Trainyard. Eliminate the guards, then reach the green extraction zone.</div>
+  <div id="cross"></div><div id="hit"></div><div id="dmg"></div>
+  <div id="stick"><div id="knob"></div></div>
+  <div class="btn" id="fire">FIRE</div>
+  <div class="btn" id="reload">RELOAD</div>
+  <div class="btn" id="jump">JUMP</div>
+</div>
+<div id="toast"></div>
+<div id="screen">
+  <h1>PROJECT I.G.I.</h1>
+  <h2>Mission 1 — Trainyard &nbsp;·&nbsp; Lightweight phone build</h2>
+  <p>Real IGI data: terrain heights, 393 decoded textures and 415 model groups
+     from Mission 1, plus 37 guard AI scripts. Three.js / WebGL2 only —
+     no .NET, no WebGPU, no big runtime download.</p>
+  <p>Phone: left stick to move · drag right side to look · FIRE to shoot.
+     Desktop: WASD + mouse, click to shoot, R reload.</p>
+  <button id="play">▶ &nbsp;PLAY</button>
+  <div id="load">Tap PLAY to load Trainyard…</div>
+  <p class="small">Lightweight build: ~1.5 MB initial (Three.js + level data). Level data
+     streams on demand. See README / REPORT for what is real IGI data and
+     what is approximated. Not affiliated with Innerloop / Eidos.</p>
+</div>
+<script type="importmap">{"imports":{"three":"./three.module.min.js"}}</script>
+<script type="module" src="./game.js"></script>
+</body>
+</html>
