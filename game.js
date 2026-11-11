@@ -1,34 +1,62 @@
-// IGI Phone v2 — Mission 1: Trainyard, REAL geometry.
-// Three.js r160 + WebGL2 only. No .NET, no WebGPU, no shadows, DPR capped at 1.
+// IGI Phone v3 — Mission 1: Trainyard, REAL IGI data, WebGL2 + Three.js r186.
+// Plain JavaScript, no WASM, no WebGPU, no shadows, no runtime download.
 //
 // What is REAL here (decoded from the user's retail game files, see REPORT.md):
-//  - Models: 169/169 LOD1 MEF models decoded (data/level1_models.json):
-//    31,564 verts / 19,149 tris / 976 draw groups, real diffuse UVs + textures.
+//  - Models: 169/169 LOD1 MEF models (data/level1_models.json): 31,564 verts /
+//    19,149 tris / 976 draw groups, real diffuse UVs + textures.
+//  - Soldiers: the 5 skinned soldier models are POSED at load time from the
+//    real retail skeletons in common/anims/*.iff (BOBH hierarchy + rest pose,
+//    data/level1_soldiers.json, tools/skin_soldiers.py). A soldier is ~1.8 m
+//    tall in the posed data — the v2 0.64–0.84 m bind-pose dwarfs are gone.
+//    If the posed file is missing, guards fall back to the v2 bind-pose
+//    geometry and the game says so on screen (never silently).
 //  - Placements: 475 placements from objects.qvm (data/level1_placements.json),
-//    real positions (1 m = 4096 units, Z up) + real orientations
-//    R = Rz(gamma).Ry(beta).Rx(alpha). Rendered: 440 static placements
-//    (63 distinct models, one InstancedMesh per model). Skipped, listed in
-//    REPORT.md: 4x `waypoint` markers, 1x unknown model 472_01_1.
-//  - Guards: all 29 real soldiers at real positions/yaw, 21 with real patrol
-//    waypoints (34 waypoints, resolved to real graph nodes).
-//  - Textures: 393 real .tex decoded into data/atlas.png (20x20 cells of 32px).
-//    Every model texture name maps to an atlas cell (0 missing).
-//  - Terrain: real terrain.hmp grid-0 detail (65x65, -3.27..+2.70 m) over a
-//    400 m patch centred on the player spawn. The main terrain shape lives in
-//    terrain.cmd, which is NOT decoded, so outside the patch the ground is a
-//    flat plane at the measured yard floor (median placement Z, -1.77 m local).
+//    real positions (1 m = 4096 units, Z up) + real orientations.
+//    Rendered: 440 static placements (63 distinct models, one InstancedMesh
+//    per model). Skipped, listed in REPORT.md: 4x `waypoint` markers, 1x
+//    unknown model 472_01_1.
+//  - Guards: 29 real soldiers at real positions/yaw; 25 in the yard fight,
+//    4 far away (633–1337 m, one 3.2 km below the yard) are rendered but
+//    never chase or shoot and are not counted in "guards left".
+//  - Textures: 393 real .tex decoded into data/atlas.webp (WebP, 108 KB;
+//    PNG fallback data/atlas.png, 684 KB). Every model texture maps to a cell.
+//  - Terrain: real terrain.hmp grid-0 detail over a 400 m patch centred on
+//    the player spawn; outside the patch the ground is a flat plane at the
+//    measured yard floor (median placement Z, -1.77 m local). terrain.cmd
+//    (main terrain shape) is NOT decoded — no tested extent made placement
+//    Z correlate with hmp height, so the hmp is detail only.
+//  - Lighting: baked-lightmap pages exist in the data (lightmaps.res) but
+//    are NOT applied in v3 — the MEF lightmap UVs + pages were assessed
+//    (see REPORT.md) and a lightmap atlas is a follow-up, not a guess.
+//    v3 shades with a hemisphere + directional light on the diffuse atlas
+//    (no real-time shadows, like playigi's baked look, but not playigi's
+//    lightmaps — do not claim baked lighting).
 //  - Objective: Objective 1 (M1_OBJ1) links to the SmallGarage Building
 //    (model 410_01_1) at local (86.4, -51.3, -2.1) m. Win = reach it.
 //    No extraction point exists in objects.qvm — none is invented.
 //  - Sounds: synthesised WebAudio only (real .wav files not shipped).
+//  - Trains: the 23 Train tasks carry only a scalar rail position and a
+//    model name (608_01_1 etc.) — no world placement — so no trains or
+//    rails are rendered. The one placed Car (622_01_1) IS rendered.
 //
-// Known limits (see REPORT.md): soldier meshes are base bind-pose vertices
-// only (bone transforms not decoded) so they render 0.64-0.84 m tall, feet at
-// the decoded placement point. Trains exist only as scalar rail positions in
-// objects.qvm (23 Train tasks) and no train model is placed as a normal
-// placement, so no trains/rails are rendered. Levels 2-14 not converted.
-// Collision with buildings/props is not decoded (terrain.cmd / MEF collision
-// chunks dropped) — the player walks on the ground height only.
+// v3 changes vs v2 (the fixes the user asked for):
+//  1. Spawn yaw: v2 used yaw = -gamma (wrong by ~90 deg — the player
+//     spawned facing away from the yard, which is why the first view was
+//     empty ground). Correct mapping is yaw = gamma - PI/2: camera forward
+//     (-sin yaw, -cos yaw) in Three maps to IGI (cos gamma, sin gamma).
+//  2. Guards can no longer kill the player in 5–10 s from behind walls.
+//     They start UNALERTED and patrol; they only engage when they can
+//     actually see the player (range + front cone + line of sight past
+//     the real Building footprints), when the player fires nearby, or
+//     when shot. No line of sight = no shooting through walls.
+//  3. Playigi's performance lessons (technique, NOT its code):
+//     auto quality detection (deviceMemory / hardwareConcurrency / GPU
+//     string), DPR cap (touch <= 1.5, x0.5–0.85 detail multiplier),
+//     antialias off on phones, fog + draw-distance culling per preset,
+//     and a 30 fps draw cap on touch (sim still runs at 60 Hz).
+//  4. Three.js r186 (was r160), WebP atlas, player/building collision
+//     from the real Building footprints, an objective compass, and a
+//     live FPS readout so the user can report a real number.
 import * as THREE from 'three';
 
 const $ = (id) => document.getElementById(id);
@@ -47,7 +75,14 @@ const toast = (t, ms = 2200) => { const e = $('toast'); e.textContent = t; e.sty
 // performs exactly that mapping (a rotation, so winding order is preserved).
 export function igiToThree(x, y, z) { return [x, z, -y]; }
 
-// Atlas: 20 columns x 20 rows of 32 px cells in a 640x640 PNG. level1.json
+// Camera yaw for an IGI gamma (facing angle in the IGI XY plane, rad).
+// Three camera forward (yaw, YXZ) is (-sin yaw, 0, -cos yaw) in Three XZ,
+// which maps to IGI (x = -sin yaw, y = cos yaw). Setting that equal to
+// (cos gamma, sin gamma) gives yaw = gamma - PI/2. (v2 used yaw = -gamma,
+// which faces ~90 deg away from the retail facing direction.)
+export function yawForGamma(gammaRad) { return gammaRad - Math.PI / 2; }
+
+// Atlas: 20 columns x 20 rows of 32 px cells in a 640x640 image. level1.json
 // `textures.index[i]` gives the cell's top-left corner as fractions
 // (u = left, v = top). Map a texture name to its cell fractions.
 export function buildAtlasMap(levelJson) {
@@ -142,31 +177,126 @@ export function groundHeightAt(x, z, terrain) {
 }
 
 // ---------------------------------------------------------------------------
+// Auto quality — playigi's technique (device measurement -> preset),
+// applied to this engine. Presets: potato / low / medium / high.
+// pixelRatio = min(DPR, cap) * detailMul, antialias off on phones,
+// fog + far plane and draw cap per preset. URL overrides: ?preset=,
+// ?scale= (extra multiplier), ?dpr= (DPR cap), ?fps=30|60.
+// ---------------------------------------------------------------------------
+export function detectQuality(env = {}) {
+  const isTouch = env.isTouch ?? (typeof matchMedia !== 'undefined'
+    ? matchMedia('(pointer: coarse)').matches : false);
+  const ram = env.deviceMemory ?? (typeof navigator !== 'undefined' ? (navigator.deviceMemory ?? 8) : 8);
+  const cores = env.hardwareConcurrency ?? (typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4);
+  const gpu = env.gpuString ?? '';
+  const lowEnd = ram <= 3 || cores <= 4;
+  const weakGpu = /adreno|mali|powervr|intel/i.test(gpu);
+  let preset;
+  if (isTouch) preset = lowEnd ? 'potato' : 'low';
+  else if (lowEnd && weakGpu) preset = 'low';
+  else if (lowEnd || weakGpu) preset = 'medium';
+  else preset = 'high';
+  return { isTouch, ram, cores, gpu, lowEnd, weakGpu, preset };
+}
+
+export const QUALITY = {
+  potato: { dprCap: 1.2, detailMul: 0.5, fogNear: 60, fogFar: 150, far: 170, drawMs: 31, antialias: false },
+  low:    { dprCap: 1.5, detailMul: 0.67, fogNear: 60, fogFar: 200, far: 220, drawMs: 31, antialias: false },
+  medium: { dprCap: 1.5, detailMul: 0.85, fogNear: 60, fogFar: 260, far: 280, drawMs: 16, antialias: false },
+  high:   { dprCap: 2, detailMul: 1, fogNear: 60, fogFar: 320, far: 340, drawMs: 16, antialias: true },
+};
+
+// Line of sight in IGI space (x, y horizontal, z up), against Building
+// footprints. Each occluder is {x, y, r, zMin, zMax} — a bounding circle
+// from the real model bounds + placement (rotation approximated away by
+// the circle, which is conservative). Returns true when a building stands
+// between the two eye points. This is game logic, not content: the
+// footprints come from the real placements + real model bounds.
+export function losBlocked(x1, y1, z1, x2, y2, z2, occluders) {
+  const dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+  if (len2 === 0) return false;
+  for (const o of occluders) {
+    // Closest approach of the segment to the occluder centre (2D).
+    let t = ((o.x - x1) * dx + (o.y - y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const cx = x1 + dx * t, cy = y1 + dy * t;
+    const d2 = (cx - o.x) * (cx - o.x) + (cy - o.y) * (cy - o.y);
+    if (d2 >= o.r * o.r) continue;
+    const zAt = z1 + (z2 - z1) * t;
+    // Blocked only if the sight line passes through the building's height.
+    if (zAt > o.zMin && zAt < o.zMax) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Game state
 // ---------------------------------------------------------------------------
 const state = {
-  hp: 100, ammo: 30, mag: 30, guardsLeft: 29, started: false, won: false, dead: false,
+  hp: 100, ammo: 30, mag: 30, guardsLeft: 25, started: false, won: false, dead: false,
   yaw: 0, pitch: 0, pos: new THREE.Vector3(0, 0, 0),
   velY: 0, onGround: true, keys: {}, joy: { x: 0, y: 0 },
   firing: false, lastShot: 0, reloadUntil: 0, startTime: 0,
 };
 
-let renderer, scene, camera, level, models, placements, atlasTex, enemies = [], tracers = [], clock;
+let renderer, scene, camera, level, models, placements, soldiers, atlasTex, enemies = [], tracers = [], clock;
 let igiGroup; // converts IGI Z-up space to Three.js Y-up space
 let objectiveThree = null; // [x, y, z] in Three space (SmallGarage)
+let quality = null, occluders = [], soldierHeight = 1.8;
+let lastDraw = 0, framesDrawn = 0, fpsCount = 0, fpsShown = 0, fpsLast = 0;
 
 async function loadLevel() {
   loadEl.textContent = 'Loading Trainyard models… (169 real MEF models, 2.2 MB)';
-  models = await (await fetch('data/level1_models.json')).json();
+  models = await (await fetch('data/level1_models.json?v=3')).json();
   loadEl.textContent = 'Loading Trainyard placements… (475 real objects.qvm placements)';
-  placements = await (await fetch('data/level1_placements.json')).json();
+  placements = await (await fetch('data/level1_placements.json?v=3')).json();
+  loadEl.textContent = 'Loading soldier poses… (real retail skeletons, common/anims/*.iff)';
+  try {
+    soldiers = await (await fetch('data/level1_soldiers.json?v=3')).json();
+    soldierHeight = soldiers.meta?.heights_m
+      ? Math.max(...Object.values(soldiers.meta.heights_m)) : 1.8;
+  } catch (e) {
+    soldiers = null; // fallback to v2 bind-pose geometry, flagged on screen
+    console.warn('[v3] level1_soldiers.json missing — guards render at bind-pose size', e);
+  }
   loadEl.textContent = 'Loading terrain + textures… (real hmp heights, 393-texture atlas)';
-  level = await (await fetch('data/level1.json')).json();
-  atlasTex = await new THREE.TextureLoader().loadAsync('data/atlas.png');
+  level = await (await fetch('data/level1.json?v=3')).json();
+  // WebP atlas (108 KB) first, PNG (684 KB) fallback.
+  const loader = new THREE.TextureLoader();
+  try {
+    atlasTex = await loader.loadAsync('data/atlas.webp?v=3');
+  } catch (e) {
+    console.warn('[v3] atlas.webp failed, falling back to atlas.png', e);
+    atlasTex = await loader.loadAsync('data/atlas.png?v=3');
+  }
   atlasTex.colorSpace = THREE.SRGBColorSpace;
   atlasTex.magFilter = THREE.NearestFilter; // cheap on a phone GPU
   atlasTex.minFilter = THREE.NearestMipmapLinearFilter;
   atlasTex.generateMipmaps = true;
+}
+
+function buildOccluders() {
+  // Real Building placements -> bounding circles from the real model bounds.
+  const modelByName = new Map(models.models.map((m) => [m.name, m]));
+  occluders = [];
+  for (const p of placements.placements) {
+    if (p.task_type !== 'Building') continue;
+    const model = modelByName.get(p.model);
+    if (!model || !model.verts.length) continue;
+    let r = 0, zMin = Infinity, zMax = -Infinity;
+    for (let i = 0; i < model.verts.length; i += 3) {
+      const x = model.verts[i], y = model.verts[i + 1], z = model.verts[i + 2];
+      r = Math.max(r, Math.hypot(x, y));
+      if (z < zMin) zMin = z;
+      if (z > zMax) zMax = z;
+    }
+    occluders.push({
+      x: p.position_local_m[0], y: p.position_local_m[1], r: r * 0.95,
+      zMin: p.position_local_m[2] + zMin, zMax: p.position_local_m[2] + zMax,
+    });
+  }
+  console.log(`[v3] occluders: ${occluders.length} real Building footprints`);
+  return occluders;
 }
 
 function buildTerrain() {
@@ -228,31 +358,34 @@ function buildStatics() {
     mesh.frustumCulled = false; // instances span the whole yard; per-mesh culling would need real bounds
     igiGroup.add(mesh);
   }
-  console.log(`[v2] statics: ${rendered} placements, ${byModel.size} models, ${totalTris.toLocaleString()} instanced tris, ${skipped} skipped, ${skippedTris} tris skipped (null-tex groups)`);
+  console.log(`[v3] statics: ${rendered} placements, ${byModel.size} models, ${totalTris.toLocaleString()} instanced tris, ${skipped} skipped, ${skippedTris} tris skipped (null-tex groups)`);
   return { rendered, models: byModel.size, totalTris, skipped };
 }
 
 function buildGuards() {
-  // All 29 real soldiers. Shared merged geometry per soldier model (5),
-  // individual meshes so each can patrol. Soldier meshes are base bind-pose
-  // vertices only (bone transforms not decoded): 0.64-0.84 m tall, origin at
-  // body centre — so the geometry is shifted up by -minZ and the mesh is put
-  // at the decoded placement point with its FEET on that point (same
-  // origin-at-base convention as every other model). Positions, yaw and
-  // patrol waypoints are the decoded ones, nothing invented.
+  // All 29 real soldiers, at real positions/yaw. Geometry: the POSED
+  // soldier models from level1_soldiers.json (real retail skeletons,
+  // ~1.8 m tall, feet at local z = 0 after the min-Z shift). Fallback:
+  // the v2 bind-pose geometry (0.64–0.84 m) if the posed file is missing.
+  // 25 yard guards fight; 4 far guards (633–1337 m away, one 3.2 km
+  // below the yard) are rendered and patrol in place but never chase,
+  // never shoot, and are not counted in "guards left".
   const atlasMap = buildAtlasMap(level);
   const geoByModel = new Map();
+  const soldierModels = soldiers ? soldiers.models : null;
   for (const name of ['000_01_1', '001_01_1', '003_01_1', '015_01_1', '019_01_1']) {
-    const model = models.models.find((m) => m.name === name);
-    const { geometry } = buildModelGeometry(model, atlasMap);
-    const zs = model.verts.filter((_, i) => i % 3 === 2);
+    const src = soldierModels
+      ? soldierModels.find((m) => m.name === name)
+      : models.models.find((m) => m.name === name);
+    const { geometry } = buildModelGeometry(src, atlasMap);
+    const zs = src.verts.filter((_, i) => i % 3 === 2);
     geometry.translate(0, 0, -Math.min(...zs)); // feet at local z = 0
     geoByModel.set(name, geometry);
   }
   const mat = new THREE.MeshLambertMaterial({
     map: atlasTex, alphaTest: 0.5, side: THREE.DoubleSide,
   });
-  let withPatrol = 0, waypoints = 0;
+  let withPatrol = 0, waypoints = 0, yard = 0, far = 0;
   for (const g of placements.guards) {
     const mesh = new THREE.Mesh(geoByModel.get(g.model), mat);
     mesh.position.set(g.position_local_m[0], g.position_local_m[1], g.position_local_m[2]);
@@ -261,17 +394,51 @@ function buildGuards() {
     igiGroup.add(mesh);
     const wps = (g.patrol && g.patrol.waypoints) ? g.patrol.waypoints.map((w) => w.position_local_m) : [];
     if (wps.length) { withPatrol++; waypoints += wps.length; }
+    const distSpawn = Math.hypot(g.position_local_m[0], g.position_local_m[1]);
+    const inYard = distSpawn < 200 && g.position_local_m[2] > -100;
+    if (inYard) yard++; else far++;
     enemies.push({
       id: g.task_id, aiType: g.ai_type, mesh, hp: 50,
       igi: { x: g.position_local_m[0], y: g.position_local_m[1], z: g.position_local_m[2] },
-      wps, wpIndex: 0, shootAt: 0,
+      wps, wpIndex: 0, shootAt: 0, facing: g.gamma_rad || 0,
       sniper: g.ai_type === 'AITYPE_SNIPER',
+      inYard, alerted: false, alertUntil: 0, aimSince: 0, canSee: false,
+      lastSeen: null, perceiveAt: Math.random() * 250,
     });
   }
-  state.guardsLeft = enemies.length;
+  state.guardsLeft = yard;
   $('left').textContent = state.guardsLeft;
-  console.log(`[v2] guards: ${enemies.length}, with patrol: ${withPatrol}, waypoints: ${waypoints}`);
-  return { total: enemies.length, withPatrol, waypoints };
+  console.log(`[v3] guards: ${enemies.length} total, ${yard} yard / ${far} far, with patrol: ${withPatrol}, waypoints: ${waypoints}, posed: ${!!soldiers}`);
+  return { total: enemies.length, yard, far, withPatrol, waypoints, posed: !!soldiers };
+}
+
+// Guard perception (IGI coords): can this guard see the player?
+// Range + front cone (or very close) + line of sight past real buildings.
+function guardCanSee(e, px, py, pzEye) {
+  const dx = px - e.igi.x, dy = py - e.igi.y;
+  const d = Math.hypot(dx, dy);
+  const range = e.sniper ? 90 : 55;
+  if (d > range) return false;
+  if (d > 12) {
+    // Front cone: 130 deg total around the guard's facing.
+    const ang = Math.atan2(dy, dx);
+    let diff = Math.abs(ang - e.facing);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
+    if (diff > 1.14) return false; // ~65 deg each side
+  }
+  const eyeZ = e.igi.z + soldierHeight * 0.85;
+  return !losBlocked(e.igi.x, e.igi.y, eyeZ, px, py, pzEye, occluders);
+}
+
+function alertGuardsNear(px, py, radius) {
+  const now = performance.now();
+  for (const e of enemies) {
+    if (!e.inYard || e.hp <= 0) continue;
+    if (Math.hypot(px - e.igi.x, py - e.igi.y) <= radius) {
+      e.alerted = true; e.alertUntil = now + 8000;
+      e.lastSeen = { x: px, y: py };
+    }
+  }
 }
 
 function shoot() {
@@ -282,17 +449,19 @@ function shoot() {
   state.lastShot = now; state.ammo--;
   $('ammo').textContent = state.ammo;
   blip(880, 0.06, 0.15);
+  // Firing alerts every yard guard within 70 m (they hear the shot).
+  alertGuardsNear(state.pos.x, -state.pos.z, 70);
   // Hitscan: nearest living guard within a small cone of the camera direction.
   const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
   let best = null, bestD = 1e9, bestPos = null;
   for (const e of enemies) {
     if (e.hp <= 0) continue;
-    const gp = guardThreePos(e); // guard centre, ~0.4 m above its feet
+    const gp = guardThreePos(e); // guard centre, ~half the posed height
     const to = gp.clone().sub(camera.position);
     const d = to.length();
-    if (d > 90) continue;
+    if (d > 100) continue;
     const ang = to.normalize().angleTo(dir);
-    if (ang < 0.09 && d < bestD) { best = e; bestD = d; bestPos = gp; }
+    if (ang < 0.06 && d < bestD) { best = e; bestD = d; bestPos = gp; }
   }
   const end = bestPos || camera.position.clone().add(dir.multiplyScalar(60));
   const tg = new THREE.BufferGeometry().setFromPoints([camera.position.clone(), end]);
@@ -300,11 +469,12 @@ function shoot() {
   scene.add(line); tracers.push({ line, until: now + 70 });
   if (best) {
     best.hp -= 34;
+    best.alerted = true; best.alertUntil = now + 8000;
+    best.lastSeen = { x: state.pos.x, y: -state.pos.z };
     const hit = $('hit'); hit.style.opacity = 1; setTimeout(() => hit.style.opacity = 0, 120);
     if (best.hp <= 0) {
       best.mesh.visible = false;
-      state.guardsLeft--;
-      $('left').textContent = state.guardsLeft;
+      if (best.inYard) { state.guardsLeft--; $('left').textContent = state.guardsLeft; }
       toast('Guard down — ' + state.guardsLeft + ' left');
     }
   }
@@ -332,19 +502,37 @@ function blip(freq, dur, vol) {
 
 // Guard's Three.js position (centre of the body): IGI (x, y, z) -> (x, z, -y).
 function guardThreePos(e) {
-  return new THREE.Vector3(e.igi.x, e.igi.z + 0.4, -e.igi.y);
+  return new THREE.Vector3(e.igi.x, e.igi.z + soldierHeight * 0.5, -e.igi.y);
 }
 
 function init() {
-  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' });
-  renderer.setPixelRatio(1); // phone: cap DPR at 1 — the single biggest win
+  // Auto quality (measured device -> preset), with URL overrides.
+  const params = new URLSearchParams(location.search);
+  let gpuStr = '';
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2') || document.createElement('canvas').getContext('webgl');
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    gpuStr = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+  } catch (e) { /* GPU string is best-effort */ }
+  const detected = detectQuality({ gpuString: gpuStr });
+  const presetName = params.get('preset') || detected.preset;
+  quality = QUALITY[presetName] || QUALITY[detected.preset];
+  quality.presetName = presetName in QUALITY ? presetName : detected.preset;
+  const dprCap = parseFloat(params.get('dpr') || '') || quality.dprCap;
+  const scaleMul = parseFloat(params.get('scale') || '') || 1;
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, dprCap) * quality.detailMul * scaleMul;
+  const fpsCap = parseInt(params.get('fps') || '', 10);
+  quality.drawMs = fpsCap === 60 ? 16 : fpsCap === 30 ? 31 : quality.drawMs;
+
+  renderer = new THREE.WebGLRenderer({ antialias: quality.antialias, powerPreference: 'low-power' });
+  renderer.setPixelRatio(pixelRatio);
   renderer.setSize(innerWidth, innerHeight);
   renderer.shadowMap.enabled = false;
   $('app').appendChild(renderer.domElement);
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x9db8d6);
-  scene.fog = new THREE.Fog(0x9db8d6, 60, 240); // short draw distance
-  camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, 300);
+  scene.fog = new THREE.Fog(0x9db8d6, quality.fogNear, quality.fogFar);
+  camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.1, quality.far + 60);
   igiGroup = new THREE.Group();
   igiGroup.rotation.x = -Math.PI / 2; // IGI Z-up -> Three.js Y-up
   scene.add(igiGroup);
@@ -358,6 +546,7 @@ function init() {
     renderer.setSize(innerWidth, innerHeight);
   });
   bindControls();
+  console.log(`[v3] quality: preset=${quality.presetName} (detected ${detected.preset}, RAM ${detected.ram} GB, ${detected.cores} cores, GPU "${gpuStr}"), pixelRatio=${pixelRatio.toFixed(2)}, draw cap ${quality.drawMs} ms, fog ${quality.fogNear}-${quality.fogFar} m`);
 }
 
 function bindControls() {
@@ -412,6 +601,22 @@ function bindControls() {
   });
 }
 
+// Push the player out of real Building footprints (2D circles, IGI coords).
+// Only when the building is tall enough to block the player at this height.
+function collideBuildings() {
+  const px = state.pos.x, py = -state.pos.z; // Three -> IGI
+  const pz = state.pos.y - 1.7; // player feet (Three y is eye height +1.7)
+  for (const o of occluders) {
+    if (pz + 1.7 > o.zMax - 0.5) continue; // building too low to block here
+    const dx = px - o.x, dy = py - o.y, d = Math.hypot(dx, dy);
+    if (d < o.r && d > 0.001) {
+      const push = o.r - d;
+      state.pos.x += (dx / d) * push;
+      state.pos.z -= (dy / d) * push;
+    }
+  }
+}
+
 function update(dt) {
   if (!state.started || state.dead || state.won) return;
   // Look
@@ -430,6 +635,7 @@ function update(dt) {
   // Stay inside the yard (Three x -650..620, z -120..1300 covers all yard placements)
   state.pos.x = THREE.MathUtils.clamp(state.pos.x, -650, 620);
   state.pos.z = THREE.MathUtils.clamp(state.pos.z, -120, 1300);
+  collideBuildings();
   // Gravity / ground follow
   const ground = groundHeightAt(state.pos.x, state.pos.z, level.terrain) + 1.7;
   state.velY -= 22 * dt;
@@ -437,29 +643,56 @@ function update(dt) {
   if (state.pos.y <= ground) { state.pos.y = ground; state.velY = 0; state.onGround = true; }
   camera.position.copy(state.pos);
   if (state.firing) shoot();
-  // Enemies: real patrol routes, chase + shoot when close (game logic only;
-  // positions and patrols are the decoded ones).
+  // Enemies — v3 fairness rules (game logic only; positions and patrols
+  // are the decoded ones). Perception runs at 4 Hz per guard, staggered.
   const now = performance.now();
+  const px = state.pos.x, py = -state.pos.z, pzEye = state.pos.y; // IGI coords, eye height
+  const grace = now < state.startTime + 3000;
   for (const e of enemies) {
     if (e.hp <= 0) continue;
+    if (now >= e.perceiveAt) {
+      e.perceiveAt = now + 250;
+      const wasAlerted = e.alerted;
+      e.canSee = e.inYard ? guardCanSee(e, px, py, pzEye) : false;
+      if (e.canSee) {
+        e.alerted = true; e.alertUntil = now + 8000;
+        e.lastSeen = { x: px, y: py };
+        if (!e.aimSince) e.aimSince = now;
+      } else {
+        e.aimSince = 0;
+        if (e.alerted && now > e.alertUntil) e.alerted = false;
+      }
+      if (e.alerted && !wasAlerted) { /* newly alerted: keeps lastSeen from perception */ }
+    }
+    if (!e.inYard) continue; // far guards patrol in place, never fight
     const gp = guardThreePos(e);
     const d = gp.distanceTo(state.pos);
-    const dx = state.pos.x - gp.x, dz = state.pos.z - gp.z; // Three XZ
-    const chaseRange = e.sniper ? 90 : 55, shootRange = e.sniper ? 90 : 45;
-    if (d < chaseRange) {
-      // Chase in IGI XY (Three x = IGI x, Three z = -IGI y)
-      const il = Math.hypot(dx, dz) || 1;
-      e.igi.x += (dx / il) * 3.2 * dt;
-      e.igi.y += (-dz / il) * 3.2 * dt;
-      e.mesh.position.set(e.igi.x, e.igi.y, e.igi.z);
-      e.mesh.rotation.z = Math.atan2(-dx, -dz); // face the player (model forward +Y)
-      if (d < shootRange && now - e.shootAt > (e.sniper ? 2200 : 1400)) {
+    if (e.alerted && e.lastSeen) {
+      // Chase the last seen position; shoot only with line of sight,
+      // after an aim delay, with distance-based hit chance.
+      const tx = e.lastSeen.x, ty = e.lastSeen.y;
+      const dx = tx - e.igi.x, dy = ty - e.igi.y;
+      const dl = Math.hypot(dx, dy);
+      const shootRange = e.sniper ? 90 : 45;
+      if (dl > 2) {
+        const sp = 3.0;
+        e.igi.x += (dx / dl) * sp * dt;
+        e.igi.y += (dy / dl) * sp * dt;
+        e.facing = Math.atan2(dy, dx);
+        e.mesh.position.set(e.igi.x, e.igi.y, e.igi.z);
+        e.mesh.rotation.z = e.facing;
+      }
+      const aimDelay = e.sniper ? 1200 : 400;
+      if (e.canSee && d < shootRange && now - e.aimSince > aimDelay && now - e.shootAt > (e.sniper ? 2600 : 1600) && !grace) {
         e.shootAt = now;
-        state.hp -= e.sniper ? 15 + Math.random() * 10 : 6 + Math.random() * 6;
-        $('hp').textContent = Math.max(0, Math.round(state.hp));
-        const dmg = $('dmg'); dmg.style.opacity = 1; setTimeout(() => dmg.style.opacity = 0, 180);
-        blip(180, 0.12, 0.12);
-        if (state.hp <= 0) { state.dead = true; endScreen(false); }
+        const hitChance = e.sniper ? 0.8 : Math.max(0.35, 1 - d / 90);
+        if (Math.random() < hitChance) {
+          state.hp -= e.sniper ? 10 + Math.random() * 6 : 4 + Math.random() * 3;
+          $('hp').textContent = Math.max(0, Math.round(state.hp));
+          const dmg = $('dmg'); dmg.style.opacity = 1; setTimeout(() => dmg.style.opacity = 0, 180);
+          blip(180, 0.12, 0.12);
+          if (state.hp <= 0) { state.dead = true; endScreen(false); }
+        }
       }
     } else if (e.wps.length) {
       // Patrol the decoded waypoints (IGI coords), loop.
@@ -470,8 +703,9 @@ function update(dt) {
       else {
         e.igi.x += (wx / wl) * 2.2 * dt;
         e.igi.y += (wy / wl) * 2.2 * dt;
+        e.facing = Math.atan2(wy, wx);
         e.mesh.position.set(e.igi.x, e.igi.y, e.igi.z);
-        e.mesh.rotation.z = Math.atan2(-wx, wy); // face along the patrol leg
+        e.mesh.rotation.z = e.facing;
       }
     }
     // Guards stand at their decoded Z (their own ground); no terrain snap.
@@ -482,9 +716,15 @@ function update(dt) {
   const od = Math.hypot(state.pos.x - objectiveThree[0], state.pos.z - objectiveThree[2]);
   const objEl = $('obj');
   objEl.textContent = `Objective 1 — Reach the Small Garage · ${Math.round(od)} m away · ${state.guardsLeft} guards left. No extraction point exists in the mission data.`;
-  if (od < 10) { state.won = true; endScreen(true); }
+  // Compass arrow: rotate so up = the garage direction from the camera.
+  const dxo = objectiveThree[0] - state.pos.x, dzo = objectiveThree[2] - state.pos.z;
+  const fwdX = -Math.sin(state.yaw), fwdZ = -Math.cos(state.yaw);
+  const rightX = Math.cos(state.yaw), rightZ = -Math.sin(state.yaw);
+  const relX = dxo * rightX + dzo * rightZ, relZ = dxo * fwdX + dzo * fwdZ;
+  $('compass').style.transform = `rotate(${Math.atan2(relX, relZ)}rad)`;
   const t = Math.floor((now - state.startTime) / 1000);
   $('time').textContent = Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+  if (od < 10) { state.won = true; endScreen(true); }
 }
 
 function endScreen(won) {
@@ -498,8 +738,23 @@ function endScreen(won) {
 function loop() {
   requestAnimationFrame(loop);
   const dt = Math.min(clock.getDelta(), 0.05);
+  const now = performance.now();
   if (state.started) update(dt);
-  renderer.render(scene, camera);
+  // Draw cap (playigi's trick): on touch the draw is capped at ~30 fps
+  // while the sim keeps running at 60 Hz — a steady frame instead of
+  // chasing 60 and stuttering.
+  if (now - lastDraw >= (quality?.drawMs ?? 16) || !framesDrawn) {
+    renderer.render(scene, camera);
+    lastDraw = now;
+    framesDrawn++;
+    fpsCount++;
+  }
+  if (now - fpsLast >= 1000) {
+    fpsShown = fpsCount;
+    fpsCount = 0; fpsLast = now;
+    const el = $('fps');
+    if (el) el.textContent = fpsShown + ' fps';
+  }
 }
 
 $('play').addEventListener('click', async () => {
@@ -510,13 +765,15 @@ $('play').addEventListener('click', async () => {
     await loadLevel();
     loadEl.textContent = 'Building Trainyard… (real models at real positions)';
     buildTerrain();
+    buildOccluders();
     const st = buildStatics();
     const gd = buildGuards();
     // Player spawn = decoded HumanPlayer position/yaw. Spawn local is (0,0,0)
-    // in Three coords (IGI local origin = spawn), camera yaw = -gamma per the
-    // decoder (OpenIGI RetailOrientation); eye 1.7 m above the ground.
+    // in Three coords (IGI local origin = spawn). Camera yaw = gamma - PI/2
+    // (v3 fix: v2's -gamma faced ~90 deg away from the retail direction),
+    // eye 1.7 m above the ground.
     const spawn = placements.player_spawn;
-    state.yaw = -spawn.gamma_rad;
+    state.yaw = yawForGamma(spawn.gamma_rad);
     state.pos.set(0, groundHeightAt(0, 0, level.terrain) + 1.7, 0);
     camera.position.copy(state.pos);
     // Objective 1: SmallGarage, local (86.4, -51.3, -2.1) m IGI -> Three.
@@ -525,7 +782,8 @@ $('play').addEventListener('click', async () => {
     state.started = true;
     screenEl.style.display = 'none';
     hudEl.classList.add('on');
-    toast(`Trainyard loaded — ${st.rendered} real objects, ${gd.total} guards. Reach the Small Garage.`);
+    toast(`Trainyard loaded — ${st.rendered} real objects, ${gd.yard} guards. Reach the Small Garage.`);
+    if (!gd.posed) toast('Note: soldier pose data missing — guards render small (known limit).', 5000);
     loop();
   } catch (err) {
     loadEl.textContent = 'Load failed: ' + err.message + ' — serve with ./start.sh and open http://127.0.0.1:8782/';
